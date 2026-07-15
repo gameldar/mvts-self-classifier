@@ -1,0 +1,44 @@
+[project]
+name = "mvts-self-classifier"
+version = "0.1.0"
+description = "Self-supervised multivariate time series classification network"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "torch>=2.2",
+    "numpy<2",
+    "pandas>=2.0",
+    "pyarrow>=15.0",
+    "tsaug==0.2.1",
+]
+
+# torch is fetched from a different index depending on the target hardware.
+# Exactly one of these extras must be selected; they are mutually exclusive.
+[project.optional-dependencies]
+cpu = ["torch>=2.2"]
+cu124 = ["torch>=2.2"]
+
+[dependency-groups]
+dev = ["ruff>=0.6"]
+
+[tool.uv]
+conflicts = [[{ extra = "cpu" }, { extra = "cu124" }]]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu124", extra = "cu124" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.ruff]
+line-length = 100

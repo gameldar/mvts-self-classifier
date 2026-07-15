@@ -1,0 +1,14 @@
+.git
+.venv
+__pycache__
+*.py[cod]
+
+# Local data, experiment outputs and images are mounted at runtime, not baked in.
+data
+data_smoke
+experiments
+scratch
+images
+
+# Legacy conda environment, superseded by pyproject.toml + uv.lock.
+environment.yml
