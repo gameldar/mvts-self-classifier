@@ -19,9 +19,14 @@ ARGS ?= --dim 115 --hidden-dim 115 --cls-size 4 --epochs 30 --batch-size 32 \
 # generate_sample_data.py arguments, e.g. `make gen GEN_ARGS='--rows 1000'`.
 GEN_ARGS ?=
 
+# cluster_eval.py arguments. Scores the trained clusters against the generated
+# behaviours; override to score a different checkpoint, e.g.
+# `make eval EVAL_ARGS='--checkpoint model_last.pth.tar data/'`.
+EVAL_ARGS ?= --save-path experiments/run --checkpoint model_last.pth.tar data/
+
 VOLUMES = -v $(CURDIR)/$(DATA):/app/data -v $(CURDIR)/$(EXPERIMENTS):/app/experiments
 
-.PHONY: build build-gpu gen run run-gpu shell clean
+.PHONY: build build-gpu gen run run-gpu eval shell clean
 
 build:
 	$(ENGINE) build -t $(IMAGE):cpu .
@@ -34,6 +39,9 @@ build-gpu:
 
 run: build
 	$(ENGINE) run --rm $(VOLUMES) $(IMAGE):cpu $(ARGS)
+
+eval: build
+	$(ENGINE) run --rm $(VOLUMES) --entrypoint python $(IMAGE):cpu cluster_eval.py $(EVAL_ARGS)
 
 run-gpu: build-gpu
 	$(ENGINE) run --rm $(GPU_FLAG) $(VOLUMES) $(IMAGE):gpu $(ARGS)

@@ -81,7 +81,7 @@ Generate sample data into `data/` through the container with `make gen` (pass ge
 options via `GEN_ARGS`, e.g. `make gen GEN_ARGS='--rows 1000'`).
 
 Older podman needs CDI for GPUs: `make run-gpu ENGINE=podman GPU_FLAG='--device nvidia.com/gpu=all'`.
-Other targets: `build`, `build-gpu`, `gen`, `shell`, `clean`.
+Other targets: `build`, `build-gpu`, `gen`, `eval`, `shell`, `clean`.
 
 The classifier runs on GPU when one is available and otherwise falls back to CPU with a
 warning. `--use-amp` (mixed precision) requires a GPU.
@@ -106,6 +106,10 @@ uv run --extra cpu python generate_sample_data.py
 This writes 500 rows of 450 data columns (150 samples per axis), so pass `--data-size 450`
 to `train.py`. Use `--rows`, `--window` and `--output` to change the shape.
 
+It also writes `data/train_labels.parquet`, a row-aligned sidecar naming the behaviour each
+window was drawn from. The windows file stays label-free so `train.py` still trains
+unsupervised; the sidecar exists only so the clusters can be scored afterwards.
+
 The evaluation of the model (this uses a CNN-LSTM based upon [Deep learning based classification of sheep behaviour from accelerometer data with imbalance](https://linkinghub.elsevier.com/retrieve/pii/S2214317322000415)) can then be performed with the following:
 
 ```shell
@@ -119,6 +123,41 @@ where:
 - `data/` is the path where the `train.parquet` is located.
 
 More details for the parameters can be found by running without arguments.
+
+### Scoring the clusters
+
+Training only reports a loss, which falls even when the model collapses every window into
+one cluster. `cluster_eval.py` loads a checkpoint, assigns each window to a cluster and
+scores those clusters against the generated behaviours:
+
+```shell
+uv run --extra cpu python cluster_eval.py data/ --save-path experiments/run \
+    --checkpoint model_last.pth.tar
+```
+
+Hyperparameters are read from the run's `configuration.json`, so the model is always
+rebuilt to match the checkpoint. Through the container: `make eval`.
+
+Cluster ids are arbitrary - nothing makes cluster 2 "walking" - so both metrics are
+invariant to how the clusters are numbered:
+
+- **cluster purity**: the fraction of windows sharing their cluster's dominant behaviour.
+  Read it with the matrix, since one-window-per-cluster would also score 1.0.
+- **mapping accuracy**: each behaviour is paired with one distinct cluster, choosing the
+  pairing that maximises agreement, and the explained fraction is reported. Because the
+  pairing is one-to-one, collapsing everything into a single cluster is penalised.
+
+A fully collapsed model scores the share of the largest behaviour (0.29 here); four clean
+clusters would score 1.0.
+
+## Tests
+
+```shell
+uv run --extra cpu --group dev python -m pytest
+```
+
+These cover the generator's label sidecar and the cluster metrics. The model code itself is
+unchanged from upstream and remains untested.
 
 ## License
 
