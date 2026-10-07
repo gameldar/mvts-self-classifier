@@ -1,5 +1,4 @@
-from torch.utils.data import Dataset, DataLoader
-import pandas as pd
+from torch.utils.data import Dataset
 import torch
 import random
 
@@ -44,16 +43,22 @@ class MTSAugmentation(object):
 
     @staticmethod
     def reshape_array_data(data):
+        """Blocked window ([x..., y..., z...]) to the (1, time, axis) view tsaug wants."""
         axis_len, remainder = divmod(data.shape[0], 3)
         if remainder != 0:
-            raise Exception("Invalid data length, not divisible by 3")
+            raise ValueError(f"window length {data.shape[0]} is not divisible by 3 axes")
         axes = data.reshape(3, axis_len)
-        x = axes[0]
-        y = axes[1]
-        z = axes[2]
+        return np.ascontiguousarray(axes.T[np.newaxis, ...])
 
-        data = np.array(list(zip(x, y, z))).reshape(1, axis_len, 3)
-        return data
+    @staticmethod
+    def flatten_array_data(data, shape):
+        """Inverse of reshape_array_data, back to the blocked layout train.parquet uses.
+
+        Reshaping the (1, time, axis) view directly would reinterpret the memory and
+        interleave the axes, leaving the view in a different layout to the input.
+        """
+        axes = data.reshape(data.shape[-2], 3).T
+        return np.ascontiguousarray(axes).reshape(shape)
 
     def __call__(self, data):
         changed = list()
@@ -62,7 +67,7 @@ class MTSAugmentation(object):
 
         for i in range(0, 2):
             name, aug = random.choice(self.augs)
-            aug = aug.augment(data).reshape(orig_shape)
+            aug = self.flatten_array_data(aug.augment(data), orig_shape)
             if np.isnan(aug).any():
                 print(f"Applied {name} and resulted in nan")
             changed.append(aug)

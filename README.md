@@ -96,6 +96,10 @@ The dataframe consists of a column `Timestamp` followed but the individual point
 | 2016-06-26 09:40:25 |  0.168 |  0.172 | 0.176 | -0.859 | -0.852 | -0.867 | 0.477 | 0.488 | 0.496 |
 | 2016-06-26 09:41:25 | -0.230 | -0.062 | 0.215 | -0.949 | -0.941 | -0.836 | 0.434 | 0.441 | 0.414 |
 
+Each window is stored blocked by axis: all `x` samples, then all `y`, then all `z`.
+`MTSAugmentation` reshapes this to `(time, axis)` for tsaug and then flattens it back to
+the same blocked layout, so augmented views, raw rows and inference inputs all agree.
+
 To generate a synthetic `data/train.parquet` for testing (tri-axial accelerometer windows
 drawn from a few behaviour prototypes so the data has structure), run:
 
