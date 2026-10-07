@@ -47,5 +47,5 @@ class CNNLSTM(nn.Module):
 
     def freeze(self, warmup=False):
         self.cnn.freeze(warmup=warmup)
-        if warmpup:
+        if warmup:
             self.lstm.freeze(warmup=warmup)
