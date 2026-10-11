@@ -1,12 +1,29 @@
 import torch.nn as nn
-import torch.nn.functional as F
+
+AXES = 3
+
+def as_axis_channels(flat):
+    """Flat blocked windows ([x..., y..., z...]) to (batch, axis, time) for the backbone.
+
+    The blocked layout maps straight onto the channel dimension, so this is a plain
+    reshape. It is only correct because MTSAugmentation preserves that layout.
+    """
+    axis_len, remainder = divmod(flat.shape[-1], AXES)
+    if remainder != 0:
+        raise ValueError(f"window length {flat.shape[-1]} is not divisible by {AXES} axes")
+    return flat.reshape(flat.shape[0], AXES, axis_len)
 
 class CNN(nn.Module):
     def __init__(self, num_cols, features=115, filters=128, dropout=0.5, maxpool=2, kernel_size=6):
         super(CNN, self).__init__()
-        lin_features = int((num_cols - (2*(kernel_size - 1))) / maxpool)
+        axis_len, remainder = divmod(num_cols, AXES)
+        if remainder != 0:
+            raise ValueError(f"window length {num_cols} is not divisible by {AXES} axes")
+        # convolve over time within each axis, with the axes as input channels so a
+        # filter sees all three at once
+        lin_features = int((axis_len - (2*(kernel_size - 1))) / maxpool)
         self.cnn = nn.Sequential(
-            nn.Conv1d(in_channels=1, out_channels=filters, kernel_size=kernel_size),
+            nn.Conv1d(in_channels=AXES, out_channels=filters, kernel_size=kernel_size),
             nn.ReLU(),
             nn.Conv1d(in_channels=filters, out_channels=filters, kernel_size=kernel_size),
             nn.ReLU(),

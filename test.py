@@ -3,11 +3,11 @@ import os
 import torch
 import torch.nn as nn
 import pandas as pd
-from lstm import CNNLSTM
+from lstm import CNNLSTM, as_axis_channels
 from utils import MTSDataset
 
 def save_checkpoint(save_path, model, optimizer, valid_loss):
-    if save_path == None:
+    if save_path is None:
         return
     state_dict = {'model_state_dict': model.state_dict(),
                   'optimizer_state_dict': optimizer.state_dict(),
@@ -17,7 +17,7 @@ def save_checkpoint(save_path, model, optimizer, valid_loss):
 
 
 def load_checkpoint(load_path, model, optimizer):
-    if load_path == None:
+    if load_path is None:
         return
 
     state_dict = torch.load(load_path)
@@ -29,7 +29,7 @@ def load_checkpoint(load_path, model, optimizer):
     return state_dict['valid_loss']
 
 def save_metrics(save_path, train_loss_list, valid_loss_list, global_steps_list):
-    if save_path == None:
+    if save_path is None:
         return
 
     state_dict = {'train_loss_list': train_loss_list,
@@ -41,7 +41,7 @@ def save_metrics(save_path, train_loss_list, valid_loss_list, global_steps_list)
 
 
 def load_metrics(load_path):
-    if load_path == None:
+    if load_path is None:
         return
 
     state_dict = torch.load(load_path)
@@ -71,7 +71,7 @@ def train(model,
     model.train()
     for epoch in range(num_epochs):
         for (values, labels, index) in valid_loader:
-            output = model(values.reshape(1, 1, 450).float())
+            output = model(as_axis_channels(torch.as_tensor(values).float().unsqueeze(0)))
 
             loss = criterion(output, labels)
             optimizer.zero_grad()
@@ -88,7 +88,7 @@ def train(model,
                 with torch.no_grad():
                     # validation loop
                     for (values, labels, index) in valid_loader:
-                        output = model(values.reshape(1, 1, 450).float())
+                        output = model(as_axis_channels(torch.as_tensor(values).float().unsqueeze(0)))
                         loss = criterion(output, labels)
                         valid_running_loss += loss.item()
 
