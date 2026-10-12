@@ -81,7 +81,7 @@ Generate sample data into `data/` through the container with `make gen` (pass ge
 options via `GEN_ARGS`, e.g. `make gen GEN_ARGS='--rows 1000'`).
 
 Older podman needs CDI for GPUs: `make run-gpu ENGINE=podman GPU_FLAG='--device nvidia.com/gpu=all'`.
-Other targets: `build`, `build-gpu`, `gen`, `eval`, `shell`, `clean`.
+Other targets: `build`, `build-gpu`, `gen`, `eval`, `sweep`, `shell`, `clean`.
 
 The classifier runs on GPU when one is available and otherwise falls back to CPU with a
 warning. `--use-amp` (mixed precision) requires a GPU.
@@ -154,14 +154,45 @@ invariant to how the clusters are numbered:
 A fully collapsed model scores the share of the largest behaviour (0.29 here); four clean
 clusters would score 1.0.
 
+### Sweeping seeds
+
+A single run cannot tell you whether a change helped. Holding everything but `--seed`
+fixed, mapping accuracy ranges from 0.29 (collapse) to 0.88 across seeds, and repeating a
+seed does not reproduce its own run - training is not deterministic on CPU, so `--seed`
+pins initialisation but not the result. `sweep.py` therefore trains several seeds and
+reports the distribution:
+
+```shell
+uv run --extra cpu python sweep.py data/ --name baseline --seeds 5
+```
+
+Each seed trains into `experiments/<name>/seed-<n>/`, is scored with the same metrics as
+`cluster_eval.py`, and the run ends with a per-seed table, mean/sd/min/max per metric, the
+cluster-usage histogram and `experiments/<name>/sweep.csv`.
+
+Anything after `--` goes to `train.py`, overriding the sweep's defaults, so a
+hyperparameter comparison is two sweeps:
+
+```shell
+uv run --extra cpu python sweep.py data/ --name coltau-0.02 --seeds 5 -- --col-tau 0.02
+uv run --extra cpu python sweep.py data/ --name coltau-0.05 --seeds 5 -- --col-tau 0.05
+```
+
+`--seed-list 1 7 42` replaces the counted seeds, and `--checkpoint` chooses what to score
+(the default is `model_last.pth.tar`, because `model_best.pth.tar` is the lowest-loss
+epoch and training loss is not a guide to cluster quality - the lowest-loss runs are
+frequently the collapsed ones). A sweep refuses to reuse an existing run directory, since
+`train.py` would resume from its checkpoint and train no further; pass `--overwrite` to
+clear them. Through the container: `make sweep`.
+
 ## Tests
 
 ```shell
 uv run --extra cpu --group dev python -m pytest
 ```
 
-These cover the generator's label sidecar and the cluster metrics. The model code itself is
-unchanged from upstream and remains untested.
+These cover the generator's label sidecar, the cluster metrics and the sweep's statistics
+and report. The model code itself is unchanged from upstream and remains untested.
 
 ## License
 

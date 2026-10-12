@@ -24,9 +24,14 @@ GEN_ARGS ?=
 # `make eval EVAL_ARGS='--checkpoint model_last.pth.tar data/'`.
 EVAL_ARGS ?= --save-path experiments/run --checkpoint model_last.pth.tar data/
 
+# sweep.py arguments. Trains several seeds and reports the spread, since a single run
+# says little; override to vary hyperparameters, e.g.
+# `make sweep SWEEP_ARGS='--name coltau-0.05 --seeds 5 data/ -- --col-tau 0.05'`.
+SWEEP_ARGS ?= --name baseline --seeds 5 data/
+
 VOLUMES = -v $(CURDIR)/$(DATA):/app/data -v $(CURDIR)/$(EXPERIMENTS):/app/experiments
 
-.PHONY: build build-gpu gen run run-gpu eval shell clean
+.PHONY: build build-gpu gen run run-gpu eval sweep shell clean
 
 build:
 	$(ENGINE) build -t $(IMAGE):cpu .
@@ -42,6 +47,9 @@ run: build
 
 eval: build
 	$(ENGINE) run --rm $(VOLUMES) --entrypoint python $(IMAGE):cpu cluster_eval.py $(EVAL_ARGS)
+
+sweep: build
+	$(ENGINE) run --rm $(VOLUMES) --entrypoint python $(IMAGE):cpu sweep.py $(SWEEP_ARGS)
 
 run-gpu: build-gpu
 	$(ENGINE) run --rm $(GPU_FLAG) $(VOLUMES) $(IMAGE):gpu $(ARGS)
