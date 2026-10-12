@@ -1,7 +1,13 @@
 import numpy as np
 import pytest
 
-from cluster_eval import confusion_matrix, format_report, mapping_accuracy, purity
+from cluster_eval import (
+    clusters_used,
+    confusion_matrix,
+    format_report,
+    mapping_accuracy,
+    purity,
+)
 
 
 def test_confusion_matrix_counts_behaviour_against_cluster():
@@ -81,3 +87,30 @@ def test_report_names_each_behaviour_and_both_metrics():
     assert "walking" in report
     assert "purity" in report
     assert "accuracy" in report
+
+
+def test_clusters_used_counts_only_clusters_with_windows_in_them():
+    behaviours = np.array(["resting", "walking"])
+    clusters = np.array([0, 2])
+
+    matrix = confusion_matrix(behaviours, clusters, num_clusters=4)
+
+    assert clusters_used(matrix) == 2
+
+
+def test_clusters_used_is_one_when_the_model_collapses():
+    behaviours = np.array(["resting", "walking", "grazing"])
+    collapsed = np.array([1, 1, 1])
+
+    matrix = confusion_matrix(behaviours, collapsed, num_clusters=4)
+
+    assert clusters_used(matrix) == 1
+
+
+def test_report_says_how_many_clusters_of_the_total_were_used():
+    behaviours = np.array(["resting", "walking"])
+    clusters = np.array([0, 0])
+
+    report = format_report(confusion_matrix(behaviours, clusters, num_clusters=4))
+
+    assert "clusters used:    1 of 4" in report

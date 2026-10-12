@@ -41,6 +41,15 @@ def purity(matrix):
     return float(matrix.values.max(axis=0).sum() / total)
 
 
+def clusters_used(matrix):
+    """How many clusters hold at least one window.
+
+    Reported next to the metrics because partial collapse is otherwise invisible in
+    them: two behaviours sharing a cluster and two clean clusters can score alike.
+    """
+    return int((matrix.values.sum(axis=0) > 0).sum())
+
+
 def mapping_accuracy(matrix):
     total = matrix.values.sum()
     if total == 0:
@@ -64,6 +73,7 @@ def format_report(matrix):
         "",
         f"cluster purity:   {purity(matrix):.3f}",
         f"mapping accuracy: {mapping_accuracy(matrix):.3f}",
+        f"clusters used:    {clusters_used(matrix)} of {len(matrix.columns)}",
         "",
         "best behaviour -> cluster pairing:",
     ]

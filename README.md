@@ -146,6 +146,10 @@ invariant to how the clusters are numbered:
 - **mapping accuracy**: each behaviour is paired with one distinct cluster, choosing the
   pairing that maximises agreement, and the explained fraction is reported. Because the
   pairing is one-to-one, collapsing everything into a single cluster is penalised.
+- **clusters used**: how many of the `--cls-size` clusters hold any windows at all. Both
+  metrics score partial collapse much like a genuinely good split, so this is the line
+  that tells the two apart: 0.79 from four clusters and 0.79 from two mean different
+  things.
 
 A fully collapsed model scores the share of the largest behaviour (0.29 here); four clean
 clusters would score 1.0.
