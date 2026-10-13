@@ -103,6 +103,12 @@ The backbone takes the three axes as input channels, so `as_axis_channels` conve
 flat window to `(batch, axis, time)` on the way in. `--data-size` stays the total column
 count and must be divisible by 3.
 
+The convolutions run over time, and their output reaches the LSTM time-major as
+`(batch, time, features)`, so the recurrence steps over the window. The projection to
+`--hidden-dim` mixes the convolution filters within each time step rather than mixing
+time itself, which would leave the LSTM recurring over filter index with no temporal
+order left to read.
+
 To generate a synthetic `data/train.parquet` for testing (tri-axial accelerometer windows
 drawn from a few behaviour prototypes so the data has structure), run:
 

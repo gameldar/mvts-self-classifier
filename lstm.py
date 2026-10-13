@@ -18,12 +18,11 @@ def as_axis_channels(flat):
 class CNN(nn.Module):
     def __init__(self, num_cols, features=115, filters=128, dropout=0.5, maxpool=2, kernel_size=6):
         super(CNN, self).__init__()
-        axis_len, remainder = divmod(num_cols, AXES)
+        _, remainder = divmod(num_cols, AXES)
         if remainder != 0:
             raise ValueError(f"window length {num_cols} is not divisible by {AXES} axes")
         # convolve over time within each axis, with the axes as input channels so a
         # filter sees all three at once
-        lin_features = int((axis_len - (2 * (kernel_size - 1))) / maxpool)
         self.cnn = nn.Sequential(
             nn.Conv1d(in_channels=AXES, out_channels=filters, kernel_size=kernel_size),
             nn.ReLU(),
@@ -31,14 +30,17 @@ class CNN(nn.Module):
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.MaxPool1d(maxpool),
-            nn.Linear(in_features=lin_features, out_features=features),
         )
+        self.project = nn.Linear(in_features=filters, out_features=features)
 
     def forward(self, x):
-        return self.cnn(x)
+        # (batch, axis, time) -> (batch, time, filters), so the LSTM that follows steps
+        # over time and the projection mixes filters within each step. Projecting the
+        # time axis instead would leave the LSTM recurring over filter index.
+        return self.project(self.cnn(x).transpose(1, 2))
 
     def freeze(self, warmup=False):
-        self.cnn.requires_grad_(False)
+        self.requires_grad_(False)
 
 
 class LSTM(nn.Module):

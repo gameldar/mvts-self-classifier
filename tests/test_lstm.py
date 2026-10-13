@@ -7,7 +7,10 @@ from model import Model
 DATA_SIZE = 450
 AXIS_LEN = DATA_SIZE // 3
 FEATURES = 115
-FILTERS = 128
+KERNEL_SIZE = 6
+MAXPOOL = 2
+# two convolutions trim (kernel_size - 1) samples each, then the pool halves what is left
+TIME_STEPS = (AXIS_LEN - 2 * (KERNEL_SIZE - 1)) // MAXPOOL
 
 
 def test_as_axis_channels_splits_a_blocked_window_into_axes():
@@ -31,7 +34,20 @@ def test_backbone_consumes_the_three_axes_as_channels():
 
     features = backbone(torch.randn(4, 3, AXIS_LEN))
 
-    assert features.shape == (4, FILTERS, FEATURES)
+    assert features.shape == (4, TIME_STEPS, FEATURES)
+
+
+def test_backbone_puts_time_on_the_sequence_axis_so_the_lstm_steps_over_it():
+    """The sequence length must follow the window, not the fixed filter count.
+
+    With time collapsed into the feature vector instead, dim 1 is the number of
+    convolution filters and does not move when the window changes length.
+    """
+    short = CNN(3 * 60, FEATURES)(torch.randn(2, 3, 60))
+    long = CNN(3 * 120, FEATURES)(torch.randn(2, 3, 120))
+
+    assert short.shape[1] == (60 - 2 * (KERNEL_SIZE - 1)) // MAXPOOL
+    assert long.shape[1] == (120 - 2 * (KERNEL_SIZE - 1)) // MAXPOOL
 
 
 def test_backbone_rejects_a_flattened_single_channel_window():
