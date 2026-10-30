@@ -12,9 +12,12 @@ can score what the model found against what the observers recorded.
 import argparse
 import glob
 import os
+from fractions import Fraction
 from typing import NamedTuple
 
+import numpy as np
 import pandas as pd
+from scipy.signal import resample_poly
 
 from generate_sample_data import write
 
@@ -35,6 +38,21 @@ SENSORS = {
     "ear": Sensor("ear", "ear", 250, 25.0),
 }
 
+
+class Fusion(NamedTuple):
+    """Several sensors laid out as channels of one window, resampled to a common length."""
+
+    name: str
+    sensors: tuple[Sensor, ...]
+    samples: int
+
+
+# The halter runs at 30 Hz and the ear at 25 Hz over the same 10 s, so one has to move.
+# The ear is resampled up rather than the halter down, keeping the halter's full
+# bandwidth in case fast jaw motion is what separates chewing from rumination.
+FUSIONS = {
+    "combined": Fusion("combined", (SENSORS["halter"], SENSORS["ear"]), 300),
+}
 
 # A segment is labelled with every action seen in it, so 26 compound classes appear.
 # Collapsing takes the most specific action present: what the sheep was doing outranks
@@ -64,23 +82,66 @@ def sensor_columns(sensor):
     return [f"{sensor.prefix}_{axis}_{i}" for axis in AXES for i in range(sensor.samples)]
 
 
-def data_size(sensor):
-    """The --data-size train.py needs for this sensor."""
-    return len(AXES) * sensor.samples
+def fused_columns(fusion):
+    """The output column names of a fusion, blocked per channel in sensor order."""
+    return [
+        f"{sensor.prefix}_{axis}_{i}"
+        for sensor in fusion.sensors
+        for axis in AXES
+        for i in range(fusion.samples)
+    ]
 
 
-def convert(frame, sensor):
-    """One sensor's windows out of a segment frame, with labels row-aligned."""
+def channels(layout):
+    """How many input channels a sensor or fusion produces."""
+    sensors = layout.sensors if isinstance(layout, Fusion) else (layout,)
+    return len(AXES) * len(sensors)
+
+
+def data_size(layout):
+    """The --data-size train.py needs for this sensor or fusion."""
+    return channels(layout) * layout.samples
+
+
+def resample_axis(values, target):
+    """One axis of every segment resampled to target samples, with unity DC gain."""
+    native = values.shape[1]
+    if native == target:
+        return values
+    factor = Fraction(target, native)
+    return resample_poly(values, factor.numerator, factor.denominator, axis=1)
+
+
+def fuse(frame, fusion):
+    """Every sensor's axes resampled to the fusion's common length, in channel order."""
+    blocks = []
+    for sensor in fusion.sensors:
+        for axis in AXES:
+            columns = [f"{sensor.prefix}_{axis}_{i}" for i in range(sensor.samples)]
+            missing = [column for column in columns if column not in frame.columns]
+            if missing:
+                raise ValueError(
+                    f"segments are missing {len(missing)} {sensor.name} columns, from {missing[0]}"
+                )
+            blocks.append(resample_axis(frame[columns].to_numpy(dtype="float64"), fusion.samples))
+    return np.hstack(blocks).astype("float32")
+
+
+def convert(frame, layout):
+    """One sensor's or fusion's windows out of a segment frame, with labels row-aligned."""
     timestamps = pd.date_range("2016-06-26 09:40:25", periods=len(frame), freq="min")
 
-    columns = sensor_columns(sensor)
-    missing = [column for column in columns if column not in frame.columns]
-    if missing:
-        raise ValueError(
-            f"segments are missing {len(missing)} {sensor.name} columns, from {missing[0]}"
-        )
-    samples = frame[columns].astype("float32").reset_index(drop=True)
-    samples.columns = [f"{axis}_{i}" for axis in AXES for i in range(sensor.samples)]
+    if isinstance(layout, Fusion):
+        samples = pd.DataFrame(fuse(frame, layout), columns=fused_columns(layout))
+    else:
+        columns = sensor_columns(layout)
+        missing = [column for column in columns if column not in frame.columns]
+        if missing:
+            raise ValueError(
+                f"segments are missing {len(missing)} {layout.name} columns, from {missing[0]}"
+            )
+        samples = frame[columns].astype("float32").reset_index(drop=True)
+        samples.columns = [f"{axis}_{i}" for axis in AXES for i in range(layout.samples)]
     # concatenated rather than inserted: these frames run to 900 columns, and inserting
     # into one selected out of a wider frame leaves it badly fragmented
     windows = pd.concat([pd.Series(timestamps, name="Timestamp"), samples], axis=1)
@@ -140,9 +201,9 @@ def main():
     parser.add_argument("source", help="directory holding the per-sheep CSVs")
     parser.add_argument(
         "--sensor",
-        choices=sorted(SENSORS),
+        choices=sorted(SENSORS) + sorted(FUSIONS),
         default="halter",
-        help="which accelerometer to build the dataset from",
+        help="one sensor, or 'combined' for both fused as six channels",
     )
     parser.add_argument(
         "--location",
@@ -157,18 +218,19 @@ def main():
     )
     args = parser.parse_args()
 
-    sensor = SENSORS[args.sensor]
-    output = args.output or os.path.join(f"data/sheep-{sensor.name}", "train.parquet")
+    layout = FUSIONS.get(args.sensor) or SENSORS[args.sensor]
+    output = args.output or os.path.join(f"data/sheep-{layout.name}", "train.parquet")
 
     segments = read_segments(args.source)
     if args.location:
         segments = select_locations(segments, args.location)
-    dataset = convert(segments, sensor)
+    dataset = convert(segments, layout)
     labels_path = write(dataset, output)
 
-    print(f"Wrote {len(dataset.windows)} segments x {data_size(sensor)} data columns to {output}")
+    print(f"Wrote {len(dataset.windows)} segments x {data_size(layout)} data columns to {output}")
     print(f"Wrote observed behaviours to {labels_path}")
-    print(f"data-size for train.py: {data_size(sensor)}")
+    print(f"data-size for train.py: {data_size(layout)}")
+    print(f"channels for train.py:  {channels(layout)}")
     print(f"cls-size for train.py:  {len(dataset.counts)}")
     print(f"behaviour mix: {dataset.counts}")
 

@@ -24,8 +24,8 @@ def init_random(seed):
   random.seed(seed)
 
 
-def create_base_model(num_cols, num_features):
-    return CNN(num_cols, num_features)
+def create_base_model(num_cols, num_features, channels=3):
+    return CNN(num_cols, num_features, channels=channels)
 
 def get_params_groups(model, args):
     if not args.no_bias_wd and args.bbone_wd is None:
@@ -269,6 +269,8 @@ parser.add_argument('--fixed-cls', action='store_true',
                     help='use a fixed classifier')
 parser.add_argument('--no-leaky', action='store_true',
                     help='use regular relu layers instead of leaky relu in MLP')
+parser.add_argument('--channels', default=3, type=int,
+                    help='input channels per window; 3 for one tri-axial sensor, 6 for two fused')
 parser.add_argument('--data-size', default=450, type=int,
                     help='length of input data size')
 parser.add_argument('--pretrained', default=None, type=str,
@@ -346,7 +348,7 @@ def main():
     print(f'Executing: python {" ".join(sys.argv)}')
     with open(os.path.join(args.save_path, 'configuration.json'), 'w') as f:
         json.dump(args.__dict__, f, indent=2)
-    base_model = create_base_model(args.data_size, args.hidden_dim)
+    base_model = create_base_model(args.data_size, args.hidden_dim, channels=args.channels)
     classifier = LSTM(args.hidden_dim)
 
     model = Model(base_model=base_model,
@@ -376,7 +378,7 @@ def main():
     args.start_epoch, best_loss = resume_checkpoint(args.resume, args.save_path, args.start_epoch, model, optimizer)
     cudnn.benchmark = True
     #traindir = os.path.join(args.data, 'train')
-    transform = MTSAugmentation()
+    transform = MTSAugmentation(channels=args.channels)
     import pandas as pd
     df = pd.read_parquet(os.path.join(args.data, 'train.parquet'))
     df = df.drop(columns=['Timestamp'])

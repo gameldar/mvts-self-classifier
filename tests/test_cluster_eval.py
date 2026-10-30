@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from cluster_eval import (
+    backbone_channels,
     clusters_used,
     confusion_matrix,
     format_report,
@@ -114,3 +115,12 @@ def test_report_says_how_many_clusters_of_the_total_were_used():
     report = format_report(confusion_matrix(behaviours, clusters, num_clusters=4))
 
     assert "clusters used:    1 of 4" in report
+
+
+def test_backbone_channels_defaults_to_three_for_runs_trained_before_the_option():
+    """Configs written before --channels existed must still rebuild a tri-axial backbone."""
+    assert backbone_channels({"data_size": 900, "hidden_dim": 115}) == 3
+
+
+def test_backbone_channels_uses_the_recorded_count_when_present():
+    assert backbone_channels({"data_size": 1800, "hidden_dim": 115, "channels": 6}) == 6

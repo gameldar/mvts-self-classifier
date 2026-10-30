@@ -99,3 +99,58 @@ def test_model_takes_flat_views_and_returns_logits_per_head():
 
     assert len(embeddings) == len(views)
     assert probs[0][0].shape == (2, 4)
+
+
+SENSORS_SIZE = 6 * 300
+SENSOR_LEN = 300
+
+
+def test_as_axis_channels_splits_a_six_channel_window():
+    """Two tri-axial sensors fused into one window: six equal blocks, in order."""
+    flat = torch.tensor([[1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0, 6.0, 6.0]])
+
+    channels = as_axis_channels(flat, channels=6)
+
+    assert channels.shape == (1, 6, 2)
+    assert channels[0, 3].tolist() == [4.0, 4.0]
+    assert channels[0, 5].tolist() == [6.0, 6.0]
+
+
+def test_as_axis_channels_rejects_a_width_that_is_not_divisible_by_its_channels():
+    with pytest.raises(ValueError):
+        as_axis_channels(torch.zeros(1, 14), channels=6)
+
+
+def test_backbone_consumes_six_channels_when_told_to():
+    backbone = CNN(SENSORS_SIZE, FEATURES, channels=6)
+
+    features = backbone(torch.randn(4, 6, SENSOR_LEN))
+
+    assert features.shape == (4, (SENSOR_LEN - 2 * (KERNEL_SIZE - 1)) // MAXPOOL, FEATURES)
+
+
+def test_backbone_reports_its_channel_count_so_callers_need_no_second_source():
+    assert CNN(DATA_SIZE, FEATURES).channels == 3
+    assert CNN(SENSORS_SIZE, FEATURES, channels=6).channels == 6
+
+
+def test_backbone_rejects_a_six_channel_width_that_does_not_divide():
+    with pytest.raises(ValueError):
+        CNN(SENSORS_SIZE - 1, FEATURES, channels=6)
+
+
+def test_model_reads_the_channel_count_off_the_backbone_it_was_given():
+    """Model must not need telling separately; a mismatch would reshape silently wrong."""
+    model = Model(
+        base_model=CNN(SENSORS_SIZE, FEATURES, channels=6),
+        classifier=LSTM(FEATURES),
+        dim=FEATURES,
+        cls_size=[5],
+    )
+    views = [torch.randn(2, SENSORS_SIZE), torch.randn(2, SENSORS_SIZE)]
+
+    embeddings = model(views, return_embds=True)
+    probs = model(embeddings, return_embds=False)
+
+    assert len(embeddings) == len(views)
+    assert probs[0][0].shape == (2, 5)

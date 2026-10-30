@@ -31,7 +31,8 @@ class MTSDataset(Dataset):
 
 
 class MTSAugmentation(object):
-    def __init__(self):
+    def __init__(self, channels=3):
+        self.channels = channels
         self.augs = [("Noise", AddNoise()),
                 ("TimeWarp", TimeWarp()),
                 ("Reverse", Reverse()),
@@ -42,32 +43,34 @@ class MTSAugmentation(object):
                 ]
 
     @staticmethod
-    def reshape_array_data(data):
-        """Blocked window ([x..., y..., z...]) to the (1, time, axis) view tsaug wants."""
-        axis_len, remainder = divmod(data.shape[0], 3)
+    def reshape_array_data(data, channels=3):
+        """Blocked window ([x..., y..., z...]) to the (1, time, channel) view tsaug wants."""
+        axis_len, remainder = divmod(data.shape[0], channels)
         if remainder != 0:
-            raise ValueError(f"window length {data.shape[0]} is not divisible by 3 axes")
-        axes = data.reshape(3, axis_len)
+            raise ValueError(
+                f"window length {data.shape[0]} is not divisible by {channels} channels"
+            )
+        axes = data.reshape(channels, axis_len)
         return np.ascontiguousarray(axes.T[np.newaxis, ...])
 
     @staticmethod
-    def flatten_array_data(data, shape):
+    def flatten_array_data(data, shape, channels=3):
         """Inverse of reshape_array_data, back to the blocked layout train.parquet uses.
 
-        Reshaping the (1, time, axis) view directly would reinterpret the memory and
-        interleave the axes, leaving the view in a different layout to the input.
+        Reshaping the (1, time, channel) view directly would reinterpret the memory and
+        interleave the channels, leaving the view in a different layout to the input.
         """
-        axes = data.reshape(data.shape[-2], 3).T
+        axes = data.reshape(data.shape[-2], channels).T
         return np.ascontiguousarray(axes).reshape(shape)
 
     def __call__(self, data):
         changed = list()
         orig_shape = data.shape
-        data = self.reshape_array_data(data)
+        data = self.reshape_array_data(data, self.channels)
 
         for i in range(0, 2):
             name, aug = random.choice(self.augs)
-            aug = self.flatten_array_data(aug.augment(data), orig_shape)
+            aug = self.flatten_array_data(aug.augment(data), orig_shape, self.channels)
             if np.isnan(aug).any():
                 print(f"Applied {name} and resulted in nan")
             changed.append(aug)

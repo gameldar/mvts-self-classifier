@@ -93,6 +93,14 @@ def load_training_config(save_path):
         return json.load(handle)
 
 
+def backbone_channels(config):
+    """How many input channels the recorded run used.
+
+    Runs trained before --channels existed have no such key and were all tri-axial.
+    """
+    return config.get("channels", 3)
+
+
 def assign_clusters(checkpoint_path, config, windows, batch_size=64):
     """Run the trained model over each window and return its arg-max cluster id."""
     import torch
@@ -102,7 +110,9 @@ def assign_clusters(checkpoint_path, config, windows, batch_size=64):
 
     cls_size = config["cls_size"]
     model = Model(
-        base_model=CNN(config["data_size"], config["hidden_dim"]),
+        base_model=CNN(
+            config["data_size"], config["hidden_dim"], channels=backbone_channels(config)
+        ),
         classifier=LSTM(config["hidden_dim"]),
         dim=config["dim"],
         cls_size=cls_size,
@@ -120,7 +130,7 @@ def assign_clusters(checkpoint_path, config, windows, batch_size=64):
         for start in range(0, len(values), batch_size):
             batch = values[start : start + batch_size]
             # same flat-to-channels conversion the training path uses
-            logits = model(as_axis_channels(batch))
+            logits = model(as_axis_channels(batch, backbone_channels(config)))
             # Model returns one logit tensor per classifier head; the first is cls_0.
             assigned.append(logits[0].argmax(dim=1))
 

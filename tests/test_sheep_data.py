@@ -5,10 +5,12 @@ import pytest
 from pandas.errors import PerformanceWarning
 
 from sheep_data import (
+    FUSIONS,
     SENSORS,
     collapse_label,
     convert,
     data_size,
+    fused_columns,
     location_of,
     read_segments,
     select_locations,
@@ -197,3 +199,69 @@ def test_labels_carry_the_location_alongside_the_source():
     dataset = convert(frame, SENSORS["halter"])
 
     assert list(dataset.labels["location"]) == ["Muresk Stubble", "Muresk Stubble"]
+
+
+def constant_segment_frame(rows=2):
+    """Like segment_frame but every channel is a distinct constant, so resampling is checkable."""
+    columns = {}
+    for prefix, samples in (("halt", SENSORS["halter"].samples), ("ear", SENSORS["ear"].samples)):
+        for index, axis in enumerate("xyz"):
+            value = float(index + 1) + (0.0 if prefix == "halt" else 10.0)
+            for i in range(samples):
+                columns[f"{prefix}_{axis}_{i}"] = [value for _ in range(rows)]
+    frame = pd.DataFrame(columns)
+    frame["class"] = ["standing_grazing" for _ in range(rows)]
+    return frame
+
+
+def test_fused_data_size_is_six_channels_of_the_common_length():
+    assert data_size(FUSIONS["combined"]) == 1800
+
+
+def test_fused_columns_are_blocked_per_channel_in_sensor_order():
+    columns = fused_columns(FUSIONS["combined"])
+
+    assert len(columns) == 1800
+    assert columns[0] == "halt_x_0"
+    assert columns[299] == "halt_x_299"
+    assert columns[300] == "halt_y_0"
+    assert columns[900] == "ear_x_0"
+    assert columns[-1] == "ear_z_299"
+
+
+def test_fused_windows_resample_the_ear_up_to_the_common_length():
+    dataset = convert(constant_segment_frame(), FUSIONS["combined"])
+
+    assert len(dataset.windows.columns) == 1 + 1800
+    assert dataset.windows.columns[-1] == "ear_z_299"
+
+
+def test_fused_windows_leave_the_halter_samples_untouched():
+    frame = constant_segment_frame()
+
+    fused = convert(frame, FUSIONS["combined"]).windows
+    single = convert(frame, SENSORS["halter"]).windows
+
+    assert fused["halt_x_0"].iloc[0] == single["x_0"].iloc[0]
+    assert fused["halt_z_299"].iloc[0] == single["z_299"].iloc[0]
+
+
+def test_fused_windows_preserve_a_constant_ear_channel_through_resampling():
+    """resample_poly has unity DC gain, so a constant survives it away from the edges.
+
+    The FIR has passband ripple, so allow a little slack - but far less than the 1.0
+    that separates this channel from its neighbours, which is what a layout mix-up
+    would produce.
+    """
+    dataset = convert(constant_segment_frame(), FUSIONS["combined"])
+
+    middle = [dataset.windows[f"ear_y_{i}"].iloc[0] for i in range(100, 200)]
+
+    assert all(abs(value - 12.0) < 0.02 for value in middle)
+
+
+def test_fused_labels_are_collapsed_and_row_aligned():
+    dataset = convert(constant_segment_frame(rows=3), FUSIONS["combined"])
+
+    assert len(dataset.labels) == 3
+    assert set(dataset.labels["behaviour"]) == {"grazing"}

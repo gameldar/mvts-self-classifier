@@ -3,28 +3,40 @@ import torch.nn as nn
 AXES = 3
 
 
-def as_axis_channels(flat):
-    """Flat blocked windows ([x..., y..., z...]) to (batch, axis, time) for the backbone.
+def as_axis_channels(flat, channels=AXES):
+    """Flat blocked windows ([x..., y..., z...]) to (batch, channel, time) for the backbone.
 
     The blocked layout maps straight onto the channel dimension, so this is a plain
-    reshape. It is only correct because MTSAugmentation preserves that layout.
+    reshape. It is only correct because MTSAugmentation preserves that layout. Two fused
+    sensors are six blocks rather than three, so the count is a parameter.
     """
-    axis_len, remainder = divmod(flat.shape[-1], AXES)
+    axis_len, remainder = divmod(flat.shape[-1], channels)
     if remainder != 0:
-        raise ValueError(f"window length {flat.shape[-1]} is not divisible by {AXES} axes")
-    return flat.reshape(flat.shape[0], AXES, axis_len)
+        raise ValueError(f"window length {flat.shape[-1]} is not divisible by {channels}")
+    return flat.reshape(flat.shape[0], channels, axis_len)
 
 
 class CNN(nn.Module):
-    def __init__(self, num_cols, features=115, filters=128, dropout=0.5, maxpool=2, kernel_size=6):
+    def __init__(
+        self,
+        num_cols,
+        features=115,
+        filters=128,
+        dropout=0.5,
+        maxpool=2,
+        kernel_size=6,
+        channels=AXES,
+    ):
         super(CNN, self).__init__()
-        _, remainder = divmod(num_cols, AXES)
+        _, remainder = divmod(num_cols, channels)
         if remainder != 0:
-            raise ValueError(f"window length {num_cols} is not divisible by {AXES} axes")
+            raise ValueError(f"window length {num_cols} is not divisible by {channels} channels")
         # convolve over time within each axis, with the axes as input channels so a
-        # filter sees all three at once
+        # filter sees all of them at once. Kept on the module so callers that reshape a
+        # flat window have a single source for the count.
+        self.channels = channels
         self.cnn = nn.Sequential(
-            nn.Conv1d(in_channels=AXES, out_channels=filters, kernel_size=kernel_size),
+            nn.Conv1d(in_channels=channels, out_channels=filters, kernel_size=kernel_size),
             nn.ReLU(),
             nn.Conv1d(in_channels=filters, out_channels=filters, kernel_size=kernel_size),
             nn.ReLU(),
@@ -71,6 +83,7 @@ class CNNLSTM(nn.Module):
         maxpool=2,
         kernel_size=6,
         bidirectional=False,
+        channels=AXES,
     ):
         super(CNNLSTM, self).__init__()
         self.cnn = CNN(
@@ -80,6 +93,7 @@ class CNNLSTM(nn.Module):
             dropout=dropout,
             maxpool=maxpool,
             kernel_size=kernel_size,
+            channels=channels,
         )
         self.lstm = LSTM(num_classes, features, bidirectional=bidirectional)
 

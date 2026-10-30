@@ -29,7 +29,7 @@ class Model(nn.Module):
             if return_embds:
                 # run backbone forward pass separately on each augmentation
                 for i, v in enumerate(x):
-                    _out = self.backbone(as_axis_channels(v.float()))
+                    _out = self.backbone(as_axis_channels(v.float(), self.backbone.channels))
                     if i == 0:
                         output = _out
                     else:
