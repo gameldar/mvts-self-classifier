@@ -6,7 +6,7 @@ The source code is a modified version of the PyTorch implementation, taken from:
 This is largely been simplified, to remove the distributed running support nature, and converted to work with accelerometer data.
 The internals are mostly the same but the augmentation was changed and the backbone and networks need to change.
 
-This was developed using literate programming in Emacs org-mode. To follow along, you can read: [accelerometer.md](accelerometer.md)
+The conversion was originally written as a literate walkthrough; to follow along, read [accelerometer.md](accelerometer.md).
 
 ## Setup
 

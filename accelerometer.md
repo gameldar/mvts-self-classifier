@@ -1,10 +1,12 @@
-#+TITLE:  Self-Supervised Multivariate Time Series Classification Network
+# Self-Supervised Multivariate Time Series Classification Network
 
 We convert the network to work with accelerometer data. The internals are mostly the same but the augmentation changes and the backbone and networks need to change.
 
-** Image Loader
+## Image Loader
+
 Firstly, lets get a handle on how the loader is working by having a look at the images being loaded via the model currently.
-#+begin_src python :session :results output :exports both
+
+```python
 import torch
 import utils
 from torchvision import transforms, datasets
@@ -18,13 +20,16 @@ loader = torch.utils.data.DataLoader(dataset, batch_size=12, shuffle=True, num_w
 
 print(len(dataset))
 print(len(loader))
-#+end_src
+```
 
-#+RESULTS:
-: 14169
-: 1180
+Results:
 
-#+begin_src python :session :results file :exports both
+```
+14169
+1180
+```
+
+```python
 import matplotlib.pyplot as plt
 
 labels_map = {
@@ -73,23 +78,23 @@ def show_image(ds):
 #show_image(dataset)
 show_sscn(dataset)
 "images/sample.jpg"
-#+end_src
+```
 
-#+RESULTS:
-[[file:images/sample.jpg]]
+Results:
 
+![sample](images/sample.jpg)
 
-** MTS Loader
+## MTS Loader
+
 So now that we have seen the image loader, we can apply the same to the accelerometer data and see how it looks
 
-#+begin_src python :noweb-ref utils-import
+```python
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import torch
-#+end_src
+```
 
-#+NAME: mts-dataset
-#+begin_src python
+```python
 class MTSDataset(Dataset):
     def __init__(self, dataframe, transform=None, has_labels=True):
         super(MTSDataset, self).__init__()
@@ -113,12 +118,9 @@ class MTSDataset(Dataset):
 
     def __len__(self):
         return len(self.df)
+```
 
-#+end_src
-
-#+RESULTS: mts-dataset
-
-#+begin_src python :session :results file :exports both
+```python
 import pandas as pd
 import numpy as np
 import random
@@ -181,16 +183,17 @@ random.seed(seed)
 
 show_data("examples/mtvs/complete.parquet")
 "images/accel_sample.jpg"
-#+end_src
+```
 
-#+RESULTS:
-[[file:images/accel_sample.jpg]]
+Results:
 
+![accel_sample](images/accel_sample.jpg)
 
-** Random Augmentations
+## Random Augmentations
 
 There is an existing library for performing the augmentations. It doesn't cover all the ones in the literature, but it does give a few options for modifying the signals.
-#+begin_src python :results file :exports both
+
+```python
 import numpy as np
 import pandas as pd
 from tsaug.visualization import plot
@@ -232,22 +235,22 @@ def show_tsaug(path):
 
 show_tsaug("examples/data/complete.parquet")
 return "images/accel_aug.jpg"
-#+end_src
+```
 
-#+RESULTS:
-[[file:images/accel_aug.jpg]]
+Results:
+
+![accel_aug](images/accel_aug.jpg)
 
 Therefore, we can define a class that randomly selects an augmentation and performs it when the samples are loaded.
 
-#+begin_src python :noweb-ref utils-import
+```python
 import random
 
 import numpy as np
 from tsaug import AddNoise, TimeWarp, Quantize, Drift, Reverse, Dropout, Pool
-#+end_src
+```
 
-#+NAME: mts-augmentation
-#+begin_src python :session
+```python
 class MTSAugmentation(object):
     def __init__(self):
         self.augs = [("Noise", AddNoise()),
@@ -285,13 +288,9 @@ class MTSAugmentation(object):
             changed.append(aug)
 
         return changed
+```
 
-#+end_src
-
-#+RESULTS: mts-augmentation
-
-
-#+begin_src python :session :results file :exports both
+```python
 import pandas as pd
 import numpy as np
 from tsaug.visualization import plot
@@ -316,86 +315,81 @@ def test_MTSAugment(path):
 test_MTSAugment("examples/mtvs/complete.parquet")
 
 "images/mtsaugmentation.jpg"
+```
 
-#+end_src
+Results:
 
-#+RESULTS:
-[[file:images/mtsaugmentation.jpg]]
+![mtsaugmentation](images/mtsaugmentation.jpg)
 
+# Creating utils.py
 
-* Creating utils.py
-
-#+begin_src python :tangle utils.py :noweb yes
+```python
 <<utils-import>>
 
 <<mts-dataset>>
 
 <<mts-augmentation>>
-#+end_src
+```
 
-* Rewrite train.py
+# Rewrite train.py
+
 The original implementation supported distributed calculations. Initially, we want to simplify this process and so we're not going to support this.
-Therefore we'll rewrite the =train.py= to be simplified and supporting the MTS loaders/models instead.
+Therefore we'll rewrite the `train.py` to be simplified and supporting the MTS loaders/models instead.
 
-** Argument parsing
+## Argument parsing
 
 To allow for the overriding of settings, we'll reuse the argument parser and use that for the configurations.
 
-#+begin_src python :noweb-ref imports
+```python
 import argparse
-#+end_src
+```
 
-#+NAME: init-arg-parser
-#+begin_src python
+```python
 parser = argparse.ArgumentParser(description='MTS Self-Supervised Classifier')
-#+end_src
-
+```
 
 Firstly, we need to define a few globally useful options
-#+begin_src python :noweb-ref parser-args
+
+```python
 parser.add_argument('--save-path', default='../saved/', type=str,
                     help='save path for checkpoints, and logs')
-#+end_src
+```
 
-
-** Initialise the random seeds
+## Initialise the random seeds
 
 To ensure that we can reproduce the same conditions each time the seed for the random numbers needs to be initialised.
 This includes, pytorch, numpy and random.
 
-#+begin_src python :noweb-ref imports
+```python
 import random
 
 import torch
 import numpy as np
-#+end_src
+```
 
-#+begin_src python :noweb-ref parser-args
+```python
 parser.add_argument('--seed', default=100, type=int,
                    help='seed for initialising training. ')
-#+end_src
+```
 
-#+NAME: init-random
-#+begin_src python
-
+```python
 def init_random(seed):
   torch.manual_seed(seed)
   torch.cuda.manual_seed_all(seed)
   np.random.seed(seed)
   random.seed(seed)
+```
 
-#+end_src
+## Handle logging
 
-** Handle logging
-
-#+begin_src python :noweb-ref imports
+```python
 import sys
 import os
-#+end_src
+```
 
-Implement =tee= for handling of the =sys.stdout= for logging:
-#+NAME: print-multiple
-#+begin_src python
+Implement `tee` for handling of the `sys.stdout` for logging:
+
+```python
 class PrintMultiple(object):
     def __init__(self, *files):
         self.files = files
@@ -408,28 +402,27 @@ class PrintMultiple(object):
     def flush(self):
         for f in self.files:
             f.flush()
-#+end_src
+```
 
-
-** Model construction
+## Model construction
 
 The model is built up of a few primary components:
+
 1. The backbone (or base model) - this is the pretrained model that does the initial feature extraction on the data. In an image network there are a number of options such as ResNet, ImageNet etc. For accelerometer data there isn't an equivalent. We can potentially reuse the CNN configuration from the grazing behaviours here.
 
-#+begin_src python :noweb-ref imports
+```python
 from model import Model
 from lstm import CNN, LSTM
-#+end_src
+```
 
-#+NAME: create-base-model
-#+begin_src python
+```python
 def create_base_model(num_cols, num_features):
     return CNN(num_cols, num_features)
-#+end_src
+```
 
-  2. The classifier - this is the part that does classification of the previous data. In the SSCM this is multi-layer perceptron and had a bunch of configuration options. For the MTS this would be better with a LSTM as shown by the previous model. Ideally this should be easily replace with a custom implementation.
+2. The classifier - this is the part that does classification of the previous data. In the SSCM this is multi-layer perceptron and had a bunch of configuration options. For the MTS this would be better with a LSTM as shown by the previous model. Ideally this should be easily replace with a custom implementation.
 
-#+begin_src python :noweb-ref parser-args
+```python
 parser.add_argument('--dim', default=128, type=int, metavar='DIM',
                     help='size of MLP embedding layer')
 parser.add_argument('--hidden-dim', default=4096, type=int, metavar='HDIM',
@@ -446,12 +439,9 @@ parser.add_argument('--no-leaky', action='store_true',
                     help='use regular relu layers instead of leaky relu in MLP')
 parser.add_argument('--data-size', default=450, type=int,
                     help='length of input data size')
-#+end_src
+```
 
-
-
-#+NAME: create-model
-#+begin_src python
+```python
     base_model = create_base_model(args.data_size, args.hidden_dim)
     classifier = LSTM(args.hidden_dim)
 
@@ -466,29 +456,32 @@ parser.add_argument('--data-size', default=450, type=int,
     # move it to cuda based parameters
     #model = torch.nn.DataParallel(model).cuda()
     model = model.cuda()
-#+end_src
+```
 
-** Nearest Neighbour Queue
-The nearest neighbour queue is used to help with contrastive learning for images, based upon the paper [[cite:&dwibediLittleHelpMy2021]]
+## Nearest Neighbour Queue
 
-  This is specific to the image implementation, so for the moment I'll ignore it as there is an option to turn it off anyway.
+The nearest neighbour queue is used to help with contrastive learning for images, based upon the paper [cite:&dwibediLittleHelpMy2021]
 
-** Loading existing data
+This is specific to the image implementation, so for the moment I'll ignore it as there is an option to turn it off anyway.
+
+## Loading existing data
 
 There are three parts to this:
-*** Load pretrained data
+
+### Load pretrained data
+
 This should be straightforward to use as is, as it is about saving and reloading previous checkpoints and is pytorch specific.
 
-#+begin_src python :noweb-ref parser-args
+```python
 parser.add_argument('--pretrained', default=None, type=str,
                     help='path to pretrained checkpoint')
 parser.add_argument('--rm-pretrained-cls', action='store_true',
                     help='ignore classifier when loading pretrained model (used for initializing imagenet subset)')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-#+end_src
+```
 
-#+begin_src python :noweb-ref checkpoints
+```python
 def load_checkpoint(pretrained, rm_pretrained_cls, start_epoch, model):
     if pretrained is not None:
         if os.path.isfile(pretrained):
@@ -515,18 +508,17 @@ def load_checkpoint(pretrained, rm_pretrained_cls, start_epoch, model):
             print("=> loaded pre-trained model '{}'".format(pretrained))
         else:
             print("=> no checkpoint found at '{}'".format(pretrained))
+```
 
+### Saving checkpoints
 
-#+end_src
-
-*** Saving checkpoints
-
-#+begin_src python :noweb-ref imports
+```python
 import shutil
-#+end_src
+```
 
 While iterating through the training, we save the progress as we pass checkpoints - if this is the best value, or it is a regular checkpoint.
-#+begin_src python :noweb-ref checkpoints
+
+```python
 def save_checkpoint(state, is_best, is_milestone, filename):
     torch.save(state, filename)
     if is_best:
@@ -535,11 +527,11 @@ def save_checkpoint(state, is_best, is_milestone, filename):
     if is_milestone:
         shutil.copyfile(filename, os.path.join(os.path.split(filename)[0], 'model_{}.pth.tar'.format(state['epoch'])))
         print('Milestone {} model was saved.'.format(state['epoch']))
-#+end_src
+```
 
-*** Resume previous training
+### Resume previous training
 
-#+begin_src python :noweb-ref checkpoints
+```python
 def resume_checkpoint(resume, save_path, start_epoch, model, optimizer):
     last_model_path = os.path.join(save_path, 'model_last.pth.tar')
     if not resume and os.path.isfile(last_model_path):  # automatic resume
@@ -560,29 +552,28 @@ def resume_checkpoint(resume, save_path, start_epoch, model, optimizer):
             print("=> no checkpoint found at '{}'".format(resume))
 
     return start_epoch, best_loss
+```
 
-
-#+end_src
-
-#+begin_src python :noweb-ref parser-args
+```python
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
-#+end_src
+```
 
-#+NAME: init-resume
-#+begin_src python
+```python
     args.start_epoch, best_loss = resume_checkpoint(args.resume, args.save_path, args.start_epoch, model, optimizer)
-#+end_src
-** Define the loss and optimiser
+```
+
+## Define the loss and optimiser
 
 Firstly the loss function needs to be created
-#+begin_src python :noweb-ref imports
+
+```python
 from apex import parallel
 from apex.parallel.LARC import LARC
 from loss import Loss
-#+end_src
+```
 
-#+begin_src python :noweb-ref parser-args
+```python
 parser.add_argument('--row-tau', default=0.1, type=float,
                     help='row softmax temperature (default: 0.1)')
 parser.add_argument('--col-tau', default=0.05, type=float,
@@ -604,12 +595,11 @@ parser.add_argument('--lars', action='store_true',
                     help='use LARS optimizer')
 parser.add_argument('--lr', '--learning-rate', default=4.8, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
-#+end_src
+```
 
+I wasn't using the parameter group modifications previously, but I've carried it across so it can be used. By default this returns the `model.parameters()` without any modifications.
 
-I wasn't using the parameter group modifications previously, but I've carried it across so it can be used. By default this returns the =model.parameters()= without any modifications.
-#+NAME: get-param-groups
-#+begin_src python
+```python
 def get_params_groups(model, args):
     if not args.no_bias_wd and args.bbone_wd is None:
         return model.parameters()
@@ -634,11 +624,9 @@ def get_params_groups(model, args):
             param_groups.append({'params': bbone_regularized, 'weight_decay': args.bbone_wd})
 
     return param_groups
+```
 
-#+end_src
-
-#+NAME: define-loss-optimiser
-#+begin_src python
+```python
     criterion = Loss(row_tau=args.row_tau, col_tau=args.col_tau, eps=args.eps).cuda(None)
     params_groups = get_params_groups(model, args)
     if args.sgd:
@@ -651,65 +639,72 @@ def get_params_groups(model, args):
 
     if args.lars:
         optimizer = LARC(optimizer=optimizer, trust_coefficient=0.001, clip=False)
-#+end_src
+```
 
-*** Defining the Loss method
-This is another implementation of =nn.Module= that is used to perform the loss calculations on the results.
+### Defining the Loss method
 
-#+begin_src python :noweb-ref loss-impl
+This is another implementation of `nn.Module` that is used to perform the loss calculations on the results.
+
+```python
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
-#+end_src
+```
 
 The implementation takes the following configuration options:
-- =row_tau= is the row softmax temperature
-- =col_tau= is the column softmax temperature
-- =eps= is a very small value to avoid divide by zero errors
 
-#+begin_src python :noweb-ref loss-impl
+- `row_tau` is the row softmax temperature
+- `col_tau` is the column softmax temperature
+- `eps` is a very small value to avoid divide by zero errors
+
+```python
 class Loss(nn.Module):
     def __init__(self, row_tau=0.1, col_tau=0.1, eps=1e-8):
         super(Loss, self).__init__()
         self.row_tau = row_tau
         self.col_tau = col_tau
         self.eps = eps
-#+end_src
+```
 
-We can then define the loss calculation as part of the =forward= method which is executed with a list of the classifier outputs:
-#+begin_src python :noweb-ref loss-impl
+We can then define the loss calculation as part of the `forward` method which is executed with a list of the classifier outputs:
+
+```python
     def forward(self, out):
         total_loss = 0.0
         num_loss_terms = 0
 
         for cls_idx, cls_out in enumerate(out):  # classifiers
-#+end_src
+```
 
 For each classifier output we then calculate ratio of the height and width of the data:
-#+begin_src python :noweb-ref loss-impl
+
+```python
             const = cls_out[0].shape[0] / cls_out[0].shape[1]
-#+end_src
+```
 
 Before calculating the column based softmax of the classifier outputs, defining our learning target:
-#+begin_src python :noweb-ref loss-impl
+
+```python
             target = []
 
             for view_i_idx, view_i in enumerate(cls_out):
                 view_i_target = F.softmax(view_i / self.col_tau, dim=0)
                 view_i_target = F.normalize(view_i_target, p=1, dim=1, eps=self.eps)
                 target.append(view_i_target)
-#+end_src
+```
 
 Then we calculate the row based softmax of the classifier outputs performing the predictions:
-#+begin_src python :noweb-ref loss-impl
+
+```python
             for view_j_idx, view_j in enumerate(cls_out):  # view j
                 view_j_pred = F.softmax(view_j / self.row_tau, dim=1)
                 view_j_pred = F.normalize(view_j_pred, p=1, dim=0, eps=self.eps)
                 view_j_log_pred = th.log(const * view_j_pred + self.eps)
-#+end_src
+```
 
 For each of the targets we can then calculate the cross entropy of the predictions against the targets:
-#+begin_src python :noweb-ref loss-impl
+
+```python
                 for view_i_idx, view_i_target in enumerate(target):
 
                     if view_i_idx == view_j_idx or (view_i_idx >= 2 and view_j_idx >= 2):
@@ -720,38 +715,32 @@ For each of the targets we can then calculate the cross entropy of the predictio
                     loss_i_j = - th.mean(th.sum(view_i_target * view_j_log_pred, dim=1))
                     total_loss += loss_i_j
                     num_loss_terms += 1
-#+end_src
+```
 
 Finally, we calculate the loss in relative terms to return:
-#+begin_src python :noweb-ref loss-impl
+
+```python
 
         total_loss /= num_loss_terms
 
         return total_loss
+```
 
-#+end_src
-
-#+begin_src python :tangle loss.py :noweb yes :eval none :results none
+```python
 <<loss-impl>>
-#+end_src
+```
 
+## Create the augmenters and loaders
 
-
-
-
-
-
-
-** Create the augmenters and loaders
 This is the first line of changes, some of which have been investigated above. Previously this was loading images and augmenting them with standard image augmentations. However, now they are loading the MTS data, and augmenting it using different augmentation methods.
 
-#+begin_src python :noweb-ref imports
+```python
 from utils import MTSAugmentation, MTSDataset
 
 from torch.cuda.amp import GradScaler
-#+end_src
+```
 
-#+begin_src python :noweb-ref parser-args
+```python
 parser.add_argument('data', metavar='DIR',
                     help='path to dataset')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
@@ -769,10 +758,9 @@ parser.add_argument('--warmup-epochs', default=10, type=int,
                     help='linear warmup epochs (default: 10)')
 parser.add_argument('--start-warmup', default=0.3, type=float,
                     help='initial warmup learning rate')
-#+end_src
+```
 
-#+NAME: def-cosine
-#+begin_src python
+```python
 # taken from DINO
 def cosine_scheduler_with_warmup(base_value, final_value, epochs, niter_per_ep, warmup_epochs=0, start_warmup_value=0):
     warmup_schedule = np.array([])
@@ -787,10 +775,9 @@ def cosine_scheduler_with_warmup(base_value, final_value, epochs, niter_per_ep, 
     schedule = np.concatenate((warmup_schedule, schedule))
     assert len(schedule) == epochs * niter_per_ep
     return schedule
-#+end_src
+```
 
-#+NAME: init-loaders
-#+begin_src python
+```python
     #traindir = os.path.join(args.data, 'train')
     transform = MTSAugmentation()
     import pandas as pd
@@ -812,16 +799,16 @@ def cosine_scheduler_with_warmup(base_value, final_value, epochs, niter_per_ep, 
 
     # mixed precision
     scaler = GradScaler(enabled=args.use_amp, init_scale=2. ** 14)
-#+end_src
+```
 
-** Perform the main training loop
+## Perform the main training loop
 
-#+begin_src python :noweb-ref imports
+```python
 import time
 from torch.cuda.amp import autocast
-#+end_src
+```
 
-#+begin_src python :noweb-ref parser-args
+```python
 parser.add_argument('--cos', action='store_true',
                     help='use cosine lr schedule')
 parser.add_argument('--use-amp', action='store_true',
@@ -833,10 +820,11 @@ parser.add_argument('-p', '--print-freq', default=16, type=int,
                     metavar='N', help='print frequency (default: 16)')
 parser.add_argument('--summary-file', default='../results-summary.csv', type=str,
                     help='save file for test best results summary information')
-#+end_src
+```
 
 Firstly some helper classes - to handle the averages and progress that is output. These accumulate values and perform the formatting for the output.
-#+begin_src python :noweb-ref train
+
+```python
 class AverageMeter(object):
     """Computes and stores the average and current value"""
     def __init__(self, name, fmt=':f'):
@@ -873,21 +861,20 @@ class ProgressMeter(object):
         num_digits = len(str(num_batches // 1))
         fmt = '{:' + str(num_digits) + 'd}'
         return '[' + fmt + '/' + fmt.format(num_batches) + ']'
-
-#+end_src
-
+```
 
 If enabled, we can adjust the learning rate as we go:
-#+begin_src python :noweb-ref train
+
+```python
 
 def adjust_lr(optimizer, lr_schedule, iteration):
     for idx, param_group in enumerate(optimizer.param_groups):
         param_group['lr'] = lr_schedule[iteration]
-
-#+end_src
+```
 
 When dealing with large amounts of data it can be helpful to clip the results. This clipping can be turned on.
-#+begin_src python :noweb-ref train
+
+```python
 def clip_gradients(model, clip):
     norms = []
     for name, p in model.named_parameters():
@@ -898,10 +885,11 @@ def clip_gradients(model, clip):
             if clip_coef < 1:
                 p.grad.data.mul_(clip_coef)
     return norms
-#+end_src
+```
 
 Finally, we can perform the actual training iteration. This is called for each epoch - which processing all the samples per epoch. We start by preparing the objects to keep track of averages and the progress.
-#+begin_src python :noweb-ref train
+
+```python
 def train(loader, model, scaler, criterion, optimizer, lr_schedule, epoch, args):
     batch_time = AverageMeter('Time', ':6.3f')
     data_time = AverageMeter('Data', ':6.3f')
@@ -913,47 +901,47 @@ def train(loader, model, scaler, criterion, optimizer, lr_schedule, epoch, args)
     )
 
     model.train()
-
-#+end_src
+```
 
 Then we perform training on each of the samples loaded by the loader:
-#+begin_src python :noweb-ref train
+
+```python
     end = time.time()
     for i, (samples, indices) in enumerate(loader):
         # measure data loading time
         data_time.update(time.time() - end)
-
-#+end_src
+```
 
 If enabled, we update the learning rate.
-#+begin_src python :noweb-ref train
+
+```python
         if args.cos:
             # update learning rate
             adjust_lr(optimizer, lr_schedule, iteration=epoch * len(loader) + i)
+```
 
-#+end_src
+Then we need to zero out the gradient of the optimizer. As explained on [Stackoverflow](https://stackoverflow.com/questions/48001598/why-do-we-need-to-call-zero-grad-in-pytorch):
 
-Then we need to zero out the gradient of the optimizer. As explained on [[ https://stackoverflow.com/questions/48001598/why-do-we-need-to-call-zero-grad-in-pytorch][Stackoverflow]]:
-#+BEGIN_QUOTE
-In PyTorch, for every mini-batch during the training phase, we typically want to explicitly set the gradients to zero before starting to do backpropragation (i.e., updating the Weights and biases) because PyTorch accumulates the gradients on subsequent backward passes. This accumulating behaviour is convenient while training RNNs or when we want to compute the gradient of the loss summed over multiple mini-batches. So, the default action has been set to accumulate (i.e. sum) the gradients on every loss.backward() call.
+> In PyTorch, for every mini-batch during the training phase, we typically want to explicitly set the gradients to zero before starting to do backpropragation (i.e., updating the Weights and biases) because PyTorch accumulates the gradients on subsequent backward passes. This accumulating behaviour is convenient while training RNNs or when we want to compute the gradient of the loss summed over multiple mini-batches. So, the default action has been set to accumulate (i.e. sum) the gradients on every loss.backward() call.
+>
+> Because of this, when you start your training loop, ideally you should zero out the gradients so that you do the parameter update correctly. Otherwise, the gradient would be a combination of the old gradient, which you have already used to update your model parameters, and the newly-computed gradient. It would therefore point in some other direction than the intended direction towards the minimum (or maximum, in case of maximization objectives).
 
-Because of this, when you start your training loop, ideally you should zero out the gradients so that you do the parameter update correctly. Otherwise, the gradient would be a combination of the old gradient, which you have already used to update your model parameters, and the newly-computed gradient. It would therefore point in some other direction than the intended direction towards the minimum (or maximum, in case of maximization objectives).
-#+END_QUOTE
-
-#+begin_src python :noweb-ref train
+```python
         optimizer.zero_grad()
-#+end_src
+```
 
 Then convert the data into cuda optimised versions:
-#+begin_src python :noweb-ref train
+
+```python
 
         samples = [x.cuda(non_blocking=True) for x in samples]
         indices = indices.cuda(non_blocking=True)
-#+end_src
+```
 
-Before performing the actual training. This is done while enabling [[https://pytorch.org/docs/stable/amp.html][Automatic Mixed Precision]] in torch which performs optimisations on the data based upon the layers used depending on what they are optimised for.
+Before performing the actual training. This is done while enabling [Automatic Mixed Precision](https://pytorch.org/docs/stable/amp.html) in torch which performs optimisations on the data based upon the layers used depending on what they are optimised for.
 First the embeddings are calculated, and then the model predictions are performed, before evaluating the predictions.
-#+begin_src python :noweb-ref train
+
+```python
         with autocast(enabled=args.use_amp):
             embds = model(samples, return_embds=True)
 
@@ -963,11 +951,11 @@ First the embeddings are calculated, and then the model predictions are performe
                 loss = criterion(probs)
 
         assert not torch.isnan(loss), 'loss is nan!'
-
-#+end_src
+```
 
 Then the gradient descent can be performed, clipping if enabled:
-#+begin_src python :noweb-ref train
+
+```python
         # compute gradient and do SGD step
         scaler.scale(loss).backward()
         if args.clip_grad:
@@ -975,10 +963,11 @@ Then the gradient descent can be performed, clipping if enabled:
             _ = clip_gradients(model, args.clip_grad)
         scaler.step(optimizer)
         scaler.update()
-#+end_src
+```
 
 Finally for this sample the averages and times can be updated, and if necessary print out the progress:
-#+begin_src python :noweb-ref train
+
+```python
         # record loss
         loss = loss.detach()
         losses.update(loss.item(), probs[0][0].size(0))
@@ -994,12 +983,11 @@ Finally for this sample the averages and times can be updated, and if necessary 
             progress.display(i)
 
     return losses.avg
-#+end_src
-
+```
 
 This can then be used within the main loop, iterating through each of the epochs calculating the loss for the iteration and saving a checkpoint.
-#+NAME: training-loop
-#+begin_src python
+
+```python
     with open(os.path.join(args.save_path, 'epoch_loss.csv'), 'a+') as loss_file:
         if args.start_epoch == 0:
               print("epoch,loss", file=loss_file)
@@ -1022,17 +1010,17 @@ This can then be used within the main loop, iterating through each of the epochs
         if output_header:
             print("Test name, epochs, best loss, start epoch, batch size, dim, hidden dim, cls size, sgd, lr, row tau, col tau, cos", file=summary_file)
         print(f'{args.save_path}, {args.epochs}, {best_loss}, {args.start_epoch}, {args.batch_size}, {args.dim}, {args.hidden_dim}, {args.cls_size}, {args.sgd}, {args.lr}, {args.row_tau}, {args.col_tau}', file=summary_file)
-#+end_src
+```
 
-#+RESULTS: training-loop
-
-
-** Bringing it all together
+## Bringing it all together
 
 And finally we can put it all together into one main method that calls the appropriate bits:
-*** Setup the environment
+
+### Setup the environment
+
 Firstly parsing the arguments and initialising random, and setting up the logging
-#+begin_src python :noweb-ref init-environment
+
+```python
     if not torch.cuda.is_available():
         raise Exception("GPU not available, aborting.")
 
@@ -1043,42 +1031,41 @@ Firstly parsing the arguments and initialising random, and setting up the loggin
     if not os.path.exists(args.save_path):
        os.makedirs(args.save_path)
     sys.stdout = PrintMultiple(sys.stdout, open(os.path.join(args.save_path, 'log.txt'), 'a+'))
-#+end_src
+```
 
-#+begin_src python :noweb-ref imports
+```python
 import json
-#+end_src
+```
 
 Then we can record the configuration that we are working with so that we can potentially replicate the scenario:
-#+begin_src python :noweb-ref init-environment
+
+```python
     print(f'Executing: python {" ".join(sys.argv)}')
     with open(os.path.join(args.save_path, 'configuration.json'), 'w') as f:
         json.dump(args.__dict__, f, indent=2)
-#+end_src
+```
 
-*** Turn on benchmarking
+### Turn on benchmarking
 
-=cudnn= benchmarking as discussed in the forums (https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936) result in the following:
+`cudnn` benchmarking as discussed in the forums (https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936) result in the following:
 
-#+begin_quote
-It enables benchmark mode in cudnn.
-benchmark mode is good whenever your input sizes for your network do not vary. This way, cudnn will look for the optimal set of algorithms for that particular configuration (which takes some time). This usually leads to faster runtime.
-But if your input sizes changes at each iteration, then cudnn will benchmark every time a new size appears, possibly leading to worse runtime performances.
-#+end_quote
+> It enables benchmark mode in cudnn.
+> benchmark mode is good whenever your input sizes for your network do not vary. This way, cudnn will look for the optimal set of algorithms for that particular configuration (which takes some time). This usually leads to faster runtime.
+> But if your input sizes changes at each iteration, then cudnn will benchmark every time a new size appears, possibly leading to worse runtime performances.
 
-#+begin_src python :noweb-ref imports
+```python
 import torch.backends.cudnn as cudnn
-#+end_src
+```
 
-#+NAME: init-benchmark
-#+begin_src python
+```python
     cudnn.benchmark = True
-#+end_src
+```
 
-*** Combining it all into one file
+### Combining it all into one file
 
 And finally to tangle it all into one file:
-#+begin_src python :tangle train.py :noweb yes
+
+```python
 <<imports>>
 
 <<init-random>>
@@ -1109,22 +1096,18 @@ def main():
 
 if __name__ == '__main__':
     main()
+```
 
-#+end_src
+# Recreating model.py
 
+The model extends [torch.nn.Module](https://pytorch.org/docs/stable/generated/torch.nn.Module.html) which is the `base class for all neural network modules`.
 
-
-* Recreating model.py
-
-The model extends [[https://pytorch.org/docs/stable/generated/torch.nn.Module.html][torch.nn.Module]] which is the =base class for all neural network modules=.
-
-#+begin_src python :noweb-ref model-import
+```python
 import torch as th
 import torch.nn as nn
-#+end_src
+```
 
-#+NAME: define-model
-#+begin_src python
+```python
 class Model(nn.Module):
     def __init__(self, base_model, classifier, dim=128, cls_size=[1000], fixed_cls=False):
         super(Model, self).__init__()
@@ -1192,20 +1175,20 @@ class Model(nn.Module):
                     # apply only cls_num
                     output = getattr(self, "cls_%d" % cls_num)(x)
         return output
+```
 
-#+end_src
-
-#+begin_src python :tangle model.py :noweb yes
+```python
 <<model-import>>
 
 <<define-model>>
-#+end_src
+```
 
-* Convert CNN-LSTM to PyTorch
+# Convert CNN-LSTM to PyTorch
 
 The CNN-LSTM was created using Keras running on Tensorflow. As the SSCN uses PyTorch we need to build the equivalent model in that.
 The existing Keras implementation is as follows:
-#+begin_src python
+
+```python
 import tensorflow as tf
 from tensorflow.keras.layers import TimeDistributed, Conv1D, MaxPooling1D, Flatten, Dense, Dropout, Bidirectional, LSTM, Input, Reshape
 
@@ -1221,11 +1204,11 @@ model = tf.keras.models.Sequential()
 model.add(cnn)
 model.add(LSTM(features))
 model.add(Dense(num_classes, activation='softmax'))
-#+end_src
-
+```
 
 Therefore in PyTorch we end up with the following:
-#+begin_src python :tangle lstm.py :session
+
+```python
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -1277,11 +1260,11 @@ class CNNLSTM(nn.Module):
         self.cnn.freeze(warmup=warmup)
         if warmpup:
             self.lstm.freeze(warmup=warmup)
-
-#+end_src
+```
 
 Lets test the model with a simple training and evaluation so we can see if we are getting similar results for the PyTorch implementation:
-#+begin_src python :tangle test.py
+
+```python
 import os
 
 import torch
@@ -1417,13 +1400,17 @@ fp = f'scratch/classification/{STUDY}/{FOLD}/'
 if not os.path.exists(fp):
     os.makedirs(fp)
 train(model=model, optimizer=optimizer, num_epochs=10, train_loader=train_iter, valid_loader=val_iter, file_path=fp)
-#+end_src
+```
 
-#+RESULTS:
-: None
+Results:
+
+```
+None
+```
 
 Then we can evaluate the results:
-#+begin_src python :results file
+
+```python
 import os
 import torch
 import matplotlib.pyplot as plt
@@ -1448,19 +1435,19 @@ plt.legend()
 plt.savefig('images/train_val_loss.jpg')
 
 return "images/train_val_loss.jpg"
-#+end_src
+```
 
-#+RESULTS:
-[[file:images/train_val_loss.jpg]]
+Results:
 
+![train_val_loss](images/train_val_loss.jpg)
 
-* Integrate CNN-LSTM with SSCN training
+# Integrate CNN-LSTM with SSCN training
 
 Now that we have a working CNN-LSTM model we can integrate that with the MTS SSCN implementation to form the classification parts of it.
 
 But first lets get a handle on how the model training works by running a single iteration in isolation. To do this we need to extract a single sample point, perform the augmentation and see what our results are.
 
-#+begin_src python :results string
+```python
 import os
 
 import torch as th
@@ -1499,7 +1486,8 @@ embds = classifier(output)
 # convert back to list of views
 embds = [embds[x: x + bs_size] for x in range(0, len(embds), bs_size)]
 return embds
-#+end_src
+```
 
-#+RESULTS:
+Results:
+
 | tensor | (((0.002 -0.0097 0.0839 -0.0248)) grad_fn=<SliceBackward>) | tensor | (((nan nan nan nan)) grad_fn=<SliceBackward>) |
