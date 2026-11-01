@@ -8,14 +8,11 @@ import os
 from model import Model
 from lstm import CNN, LSTM
 import shutil
-from apex import parallel
-from apex.parallel.LARC import LARC
 from loss import Loss
 from utils import MTSAugmentation, MTSDataset
 
-from torch.cuda.amp import GradScaler
+from torch.amp import GradScaler, autocast
 import time
-from torch.cuda.amp import autocast
 import json
 import torch.backends.cudnn as cudnn
 
@@ -27,8 +24,8 @@ def init_random(seed):
   random.seed(seed)
 
 
-def create_base_model(num_cols, num_features):
-    return CNN(num_cols, num_features)
+def create_base_model(num_cols, num_features, channels=3):
+    return CNN(num_cols, num_features, channels=channels)
 
 def get_params_groups(model, args):
     if not args.no_bias_wd and args.bbone_wd is None:
@@ -195,7 +192,7 @@ def clip_gradients(model, clip):
             if clip_coef < 1:
                 p.grad.data.mul_(clip_coef)
     return norms
-def train(loader, model, scaler, criterion, optimizer, lr_schedule, epoch, args):
+def train(loader, model, scaler, criterion, optimizer, lr_schedule, epoch, args, device):
     batch_time = AverageMeter('Time', ':6.3f')
     data_time = AverageMeter('Data', ':6.3f')
     losses = AverageMeter('Loss', ':4e')
@@ -218,14 +215,14 @@ def train(loader, model, scaler, criterion, optimizer, lr_schedule, epoch, args)
 
         optimizer.zero_grad()
 
-        samples = [x.cuda(non_blocking=True) for x in samples]
-        indices = indices.cuda(non_blocking=True)
-        with autocast(enabled=args.use_amp):
+        samples = [x.to(device, non_blocking=True) for x in samples]
+        indices = indices.to(device, non_blocking=True)
+        with autocast(device_type=device.type, enabled=args.use_amp):
             embds = model(samples, return_embds=True)
 
             probs = model(embds, return_embds=False)
 
-            with autocast(enabled=False):
+            with autocast(device_type=device.type, enabled=False):
                 loss = criterion(probs)
 
         assert not torch.isnan(loss), 'loss is nan!'
@@ -272,6 +269,8 @@ parser.add_argument('--fixed-cls', action='store_true',
                     help='use a fixed classifier')
 parser.add_argument('--no-leaky', action='store_true',
                     help='use regular relu layers instead of leaky relu in MLP')
+parser.add_argument('--channels', default=3, type=int,
+                    help='input channels per window; 3 for one tri-axial sensor, 6 for two fused')
 parser.add_argument('--data-size', default=450, type=int,
                     help='length of input data size')
 parser.add_argument('--pretrained', default=None, type=str,
@@ -333,10 +332,13 @@ parser.add_argument('--summary-file', default='../results-summary.csv', type=str
                     help='save file for test best results summary information')
 
 def main():
-    if not torch.cuda.is_available():
-        raise Exception("GPU not available, aborting.")
-
     args = parser.parse_args()
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    if device.type == 'cpu':
+        print('WARNING: no CUDA GPU detected, running on CPU (this will be slow).')
+        if args.use_amp:
+            raise Exception('--use-amp requires a CUDA GPU.')
 
     init_random(args.seed)
 
@@ -346,7 +348,7 @@ def main():
     print(f'Executing: python {" ".join(sys.argv)}')
     with open(os.path.join(args.save_path, 'configuration.json'), 'w') as f:
         json.dump(args.__dict__, f, indent=2)
-    base_model = create_base_model(args.data_size, args.hidden_dim)
+    base_model = create_base_model(args.data_size, args.hidden_dim, channels=args.channels)
     classifier = LSTM(args.hidden_dim)
 
     model = Model(base_model=base_model,
@@ -359,8 +361,8 @@ def main():
     # allow loading data in parallel if there are multiple GPUs
     # move it to cuda based parameters
     #model = torch.nn.DataParallel(model).cuda()
-    model = model.cuda()
-    criterion = Loss(row_tau=args.row_tau, col_tau=args.col_tau, eps=args.eps).cuda(None)
+    model = model.to(device)
+    criterion = Loss(row_tau=args.row_tau, col_tau=args.col_tau, eps=args.eps).to(device)
     params_groups = get_params_groups(model, args)
     if args.sgd:
         optimizer = torch.optim.SGD(params_groups, args.lr,
@@ -371,19 +373,21 @@ def main():
                                       weight_decay=args.weight_decay)
 
     if args.lars:
+        from apex.parallel.LARC import LARC
         optimizer = LARC(optimizer=optimizer, trust_coefficient=0.001, clip=False)
     args.start_epoch, best_loss = resume_checkpoint(args.resume, args.save_path, args.start_epoch, model, optimizer)
     cudnn.benchmark = True
     #traindir = os.path.join(args.data, 'train')
-    transform = MTSAugmentation()
+    transform = MTSAugmentation(channels=args.channels)
     import pandas as pd
     df = pd.read_parquet(os.path.join(args.data, 'train.parquet'))
     df = df.drop(columns=['Timestamp'])
     #df = df.loc[0:2999, :]
     #dataset = MTSDataset(traindir, transform=transform)
     dataset = MTSDataset(df, transform=transform, has_labels=False)
+    pin_memory = device.type == 'cuda'
     loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
-                                         num_workers=args.workers, pin_memory=True, sampler=None, drop_last=True)
+                                         num_workers=args.workers, pin_memory=pin_memory, sampler=None, drop_last=True)
 
     # schedulers
     lr_schedule = cosine_scheduler_with_warmup(base_value=args.lr,
@@ -394,12 +398,12 @@ def main():
                                                      start_warmup_value=args.start_warmup)
 
     # mixed precision
-    scaler = GradScaler(enabled=args.use_amp, init_scale=2. ** 14)
+    scaler = GradScaler(device.type, enabled=args.use_amp, init_scale=2. ** 14)
     with open(os.path.join(args.save_path, 'epoch_loss.csv'), 'a+') as loss_file:
         if args.start_epoch == 0:
               print("epoch,loss", file=loss_file)
         for epoch in range(args.start_epoch, args.epochs):
-            loss_i = train(loader, model, scaler, criterion, optimizer, lr_schedule, epoch, args)
+            loss_i = train(loader, model, scaler, criterion, optimizer, lr_schedule, epoch, args, device)
             print(f"{epoch},{loss_i}", file=loss_file, flush=True)
 
             is_best = True if epoch == 0 else loss_i < best_loss

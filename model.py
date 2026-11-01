@@ -1,6 +1,8 @@
 import torch as th
 import torch.nn as nn
 
+from lstm import as_axis_channels
+
 class Model(nn.Module):
     def __init__(self, base_model, classifier, dim=128, cls_size=[1000], fixed_cls=False):
         super(Model, self).__init__()
@@ -27,7 +29,7 @@ class Model(nn.Module):
             if return_embds:
                 # run backbone forward pass separately on each augmentation
                 for i, v in enumerate(x):
-                    _out = self.backbone(v.reshape(bs_size, 1, v.shape[-1]).float())
+                    _out = self.backbone(as_axis_channels(v.float(), self.backbone.channels))
                     if i == 0:
                         output = _out
                     else:

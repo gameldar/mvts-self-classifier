@@ -1,0 +1,30 @@
+# Two ways to run the classifier. Both mount local data/ and experiments/ so
+# checkpoints and logs land on the host. Append train.py arguments after the
+# service name, e.g.:
+#   docker compose run --rm cpu --dim 115 --hidden-dim 115 --cls-size 3 \
+#       --epochs 30 --batch-size 100 --data-size 9 --save-path experiments/run1 data/
+services:
+  cpu:
+    build:
+      context: .
+      args:
+        TORCH_EXTRA: cpu
+    volumes:
+      - ./data:/app/data
+      - ./experiments:/app/experiments
+
+  gpu:
+    build:
+      context: .
+      args:
+        TORCH_EXTRA: cu124
+    volumes:
+      - ./data:/app/data
+      - ./experiments:/app/experiments
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
